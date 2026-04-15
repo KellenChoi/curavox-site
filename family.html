@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hana Family Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #F9FAFB; color: #333; min-height: 100vh; }
+
+    .header { background: #2E7D32; color: white; padding: 20px 16px; }
+    .header-inner { max-width: 600px; margin: 0 auto; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .header-brand { display: flex; align-items: center; gap: 8px; }
+    .header-brand span { font-size: 24px; }
+    .header-brand p { font-size: 13px; color: #A5D6A7; font-weight: 500; }
+    .header h1 { font-size: 22px; font-weight: 700; }
+    .header .updated { font-size: 13px; color: #A5D6A7; margin-top: 4px; }
+    .lang-btn { background: rgba(255,255,255,0.2); border: none; color: white; padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; }
+    .lang-btn:hover { background: rgba(255,255,255,0.3); }
+
+    .content { max-width: 600px; margin: 24px auto; padding: 0 16px; }
+    .section { margin-bottom: 24px; }
+    .section-title { font-size: 17px; font-weight: 700; color: #374151; margin-bottom: 12px; }
+
+    .card { background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #F3F4F6; margin-bottom: 10px; }
+    .card-row { display: flex; gap: 12px; align-items: flex-start; }
+    .card-icon { font-size: 24px; margin-top: 2px; }
+    .card-body { flex: 1; min-width: 0; }
+    .card-title { font-weight: 600; color: #111; font-size: 15px; }
+    .card-sub { color: #6B7280; font-size: 13px; margin-top: 2px; }
+    .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 600; }
+    .badge-green { background: #ECFDF5; color: #059669; border: 1px solid #D1FAE5; }
+    .badge-gray { background: #F3F4F6; color: #6B7280; }
+
+    .memory-row { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #F9FAFB; }
+    .memory-cat { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px; white-space: nowrap; }
+    .memory-text { font-size: 13px; color: #374151; }
+    .memory-text span { color: #6B7280; }
+
+    .conv-card { background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #F3F4F6; margin-bottom: 12px; }
+    .conv-time { font-size: 11px; color: #9CA3AF; margin-bottom: 8px; }
+    .conv-user { display: flex; gap: 8px; margin-bottom: 8px; }
+    .conv-assistant { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid #F9FAFB; }
+    .conv-text { font-size: 13px; line-height: 1.5; }
+
+    .empty { background: white; border-radius: 16px; padding: 32px; text-align: center; color: #9CA3AF; font-size: 14px; border: 1px solid #F3F4F6; }
+    .footer { text-align: center; padding: 24px 0; }
+    .footer p { font-size: 13px; color: #9CA3AF; }
+    .footer .powered { font-size: 11px; color: #D1D5DB; margin-top: 4px; }
+
+    .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; gap: 16px; }
+    .loading p { color: #6B7280; font-size: 16px; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #E5E7EB; border-top-color: #2E7D32; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error { text-align: center; padding: 60px 20px; }
+    .error h2 { color: #C62828; font-size: 20px; margin-bottom: 8px; }
+    .error p { color: #6B7280; }
+
+    .show-more-btn { width: 100%; padding: 14px; border: 1.5px solid #D1D5DB; border-radius: 12px; background: white; color: #374151; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center; margin-top: 4px; }
+    .show-more-btn:hover { background: #F9FAFB; border-color: #9CA3AF; }
+
+    .cat-health { background: #DBEAFE; color: #1D4ED8; }
+    .cat-medication { background: #FFEDD5; color: #C2410C; }
+    .cat-family { background: #DCFCE7; color: #16A34A; }
+    .cat-doctor { background: #F3E8FF; color: #7C3AED; }
+    .cat-schedule { background: #FEF9C3; color: #A16207; }
+    .cat-preference { background: #FCE7F3; color: #BE185D; }
+    .cat-other { background: #F3F4F6; color: #4B5563; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="loading">
+      <div class="spinner"></div>
+      <p id="loading-text">Loading...</p>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://lqsebgyclqlrbjjadngx.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxxc2ViZ3ljbHFscmJqamFkbmd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzMTU4NTQsImV4cCI6MjA4OTg5MTg1NH0.m5_ivnVgRcoUlZXjXll1WSpVEBqlEG4rPSvYNbs0RP8';
+
+    // Get token from URL: /family?token=xxx or /family.html?token=xxx
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token') || window.location.pathname.split('/family/')[1]?.split('?')[0];
+    let isKo = (params.get('lang') || navigator.language || 'en').startsWith('ko');
+
+    const S = {
+      ko: {
+        title: 'Hana 가족 대시보드', greeting: (n) => `${n}님의 현황이에요.`,
+        updated: (t) => `마지막 업데이트 ${t}`, switchLang: 'English',
+        reminders: '알림', memories: '하나가 기억하는 것', conversations: '최근 대화',
+        noReminders: '예정된 알림이 없어요.', noMemories: '저장된 정보가 없어요.', noConversations: '최근 대화가 없어요.',
+        ack: '✓ 확인됨', footer: (n) => `Hana가 ${n}님을 돌봐드리고 있어요`,
+        once: '한 번', daily: '매일', weekly: '매주', monthly: '매달',
+        health: '건강', medication: '약', family: '가족', doctor: '의사', schedule: '일정', preference: '선호', other: '기타',
+        loading: '불러오고 있어요...', error: '대시보드를 찾을 수 없어요.', errorSub: '링크가 올바른지 확인해 주세요.',
+        showMore: '이전 대화 보기',
+      },
+      en: {
+        title: 'Hana Family Dashboard', greeting: (n) => `Here's how ${n} is doing.`,
+        updated: (t) => `Last updated ${t}`, switchLang: '한국어',
+        reminders: 'Reminders', memories: 'What Hana Remembers', conversations: 'Recent Conversations',
+        noReminders: 'No upcoming reminders.', noMemories: 'No saved information yet.', noConversations: 'No recent conversations.',
+        ack: '✓ Done', footer: (n) => `Hana is looking after ${n}`,
+        once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
+        health: 'Health', medication: 'Medication', family: 'Family', doctor: 'Doctor', schedule: 'Schedule', preference: 'Preference', other: 'Other',
+        loading: 'Loading...', error: 'Dashboard not found.', errorSub: 'Please check your link.',
+        showMore: 'Show older conversations',
+      },
+    };
+
+    let t = isKo ? S.ko : S.en;
+    document.getElementById('loading-text').textContent = t.loading;
+
+    const { createClient } = supabase;
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function load() {
+      if (!token) return showError();
+
+      // Call RPC function — SECURITY DEFINER bypasses RLS, only needs valid share token
+      const { data, error } = await sb.rpc('get_family_dashboard', { share_token_param: token });
+      if (error || !data || !data.profile) return showError();
+
+      const { profile, reminders, memories, conversations } = data;
+
+      // Set language from profile if no explicit param
+      if (!params.get('lang')) {
+        isKo = profile.preferred_language !== 'en';
+        t = isKo ? S.ko : S.en;
+      }
+
+      // Pair conversations into user+assistant turns (API returns newest-first, so reverse to chronological)
+      const turns = [];
+      const convRows = (conversations || []).slice().reverse();
+      for (let i = 0; i < convRows.length; i++) {
+        if (convRows[i].role === 'user') {
+          turns.push({ user: convRows[i], assistant: convRows[i+1]?.role === 'assistant' ? convRows[i+1] : null });
+          if (convRows[i+1]?.role === 'assistant') i++;
+        }
+      }
+      // Show newest conversations first
+      turns.reverse();
+
+      render(profile, reminders || [], memories || [], turns);
+    }
+
+    function showError() {
+      document.getElementById('app').innerHTML = `<div class="error"><h2>${t.error}</h2><p>${t.errorSub}</p></div>`;
+    }
+
+    function fmtTime(iso) {
+      return new Date(iso).toLocaleString(isKo ? 'ko-KR' : 'en-US', { month: isKo ? 'long' : 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+
+    function reminderIcon(type) { return type === 'medication' ? '💊' : type === 'appointment' ? '🏥' : '🔔'; }
+
+    function toggleLang() {
+      const newLang = isKo ? 'en' : 'ko';
+      const url = new URL(window.location);
+      url.searchParams.set('lang', newLang);
+      if (token && !url.searchParams.get('token')) url.searchParams.set('token', token);
+      window.location.href = url.toString();
+    }
+
+    function render(profile, reminders, memories, turns) {
+      const now = new Date().toLocaleString(isKo ? 'ko-KR' : 'en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const name = profile.display_name;
+
+      let html = `
+        <header class="header">
+          <div class="header-inner">
+            <div class="header-top">
+              <div class="header-brand"><span>🌿</span><p>${t.title}</p></div>
+              <button class="lang-btn" onclick="toggleLang()">${t.switchLang}</button>
+            </div>
+            <h1>${t.greeting(name)}</h1>
+            <p class="updated">${t.updated(now)}</p>
+          </div>
+        </header>
+        <div class="content">
+      `;
+
+      // Reminders
+      html += `<div class="section"><div class="section-title">${t.reminders} (${reminders.length})</div>`;
+      if (reminders.length === 0) {
+        html += `<div class="empty">${t.noReminders}</div>`;
+      } else {
+        reminders.forEach(r => {
+          const title = isKo ? (r.title_korean || r.title) : r.title;
+          const recLabel = t[r.recurrence] || r.recurrence;
+          html += `<div class="card"><div class="card-row"><span class="card-icon">${reminderIcon(r.reminder_type)}</span><div class="card-body"><div class="card-title">${title}</div><div class="card-sub">${fmtTime(r.scheduled_time)}</div><div style="margin-top:6px"><span class="badge badge-green">${recLabel}</span>${r.last_acknowledged_at ? ` <span class="badge badge-gray">${t.ack}</span>` : ''}</div></div></div></div>`;
+        });
+      }
+      html += '</div>';
+
+      // Memories
+      html += `<div class="section"><div class="section-title">${t.memories} (${memories.length})</div>`;
+      if (memories.length === 0) {
+        html += `<div class="empty">${t.noMemories}</div>`;
+      } else {
+        html += '<div class="card" style="padding:0">';
+        memories.forEach(m => {
+          const catLabel = t[m.category] || m.category;
+          html += `<div class="memory-row"><span class="memory-cat cat-${m.category}">${catLabel}</span><div class="memory-text">${m.key} <span>· ${m.value}</span></div></div>`;
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+
+      // Conversations — show 5 initially, "Show more" loads 5 more each time
+      const PAGE_SIZE = 5;
+      window._allTurns = turns;
+      window._shownCount = 0;
+      window._userId = profile.id;
+      html += `<div class="section"><div class="section-title">${t.conversations}</div>`;
+      if (turns.length === 0) {
+        html += `<div class="empty">${t.noConversations}</div>`;
+      }
+      html += '<div id="conv-list"></div>';
+      html += `<button class="show-more-btn" id="show-more-btn" style="display:none">${t.showMore}</button>`;
+      html += '</div>';
+
+      // Footer
+      html += `<div class="footer"><p>${t.footer(name)} 💚</p><p class="powered">Powered by Curavox</p></div>`;
+      html += '</div>';
+
+      document.getElementById('app').innerHTML = html;
+
+      // Show first batch and wire up "Show more"
+      showNextBatch();
+      const btn = document.getElementById('show-more-btn');
+      if (btn) btn.addEventListener('click', loadMore);
+    }
+
+    function renderConvCard(user, assistant) {
+      let h = `<div class="conv-card"><div class="conv-time">${fmtTime(user.created_at)}</div><div class="conv-user"><span>🙋</span><p class="conv-text">${user.content}</p></div>`;
+      if (assistant) h += `<div class="conv-assistant"><span>🌿</span><p class="conv-text">${assistant.content}</p></div>`;
+      h += '</div>';
+      return h;
+    }
+
+    function showNextBatch() {
+      const list = document.getElementById('conv-list');
+      const btn = document.getElementById('show-more-btn');
+      if (!list || !window._allTurns) return;
+
+      const PAGE = 5;
+      const start = window._shownCount;
+      const end = Math.min(start + PAGE, window._allTurns.length);
+
+      for (let i = start; i < end; i++) {
+        list.insertAdjacentHTML('beforeend', renderConvCard(window._allTurns[i].user, window._allTurns[i].assistant));
+      }
+      window._shownCount = end;
+
+      // Show button if there are more loaded turns OR we haven't hit the 3-month limit yet
+      if (btn) {
+        if (window._shownCount < window._allTurns.length) {
+          btn.style.display = '';
+        } else if (!window._noMoreData) {
+          btn.style.display = '';
+        } else {
+          btn.style.display = 'none';
+        }
+      }
+    }
+
+    async function loadMore() {
+      const btn = document.getElementById('show-more-btn');
+
+      // If we have unshown turns already loaded, show them first
+      if (window._shownCount < window._allTurns.length) {
+        showNextBatch();
+        return;
+      }
+
+      // Otherwise fetch more from Supabase (next 20 rows, going back up to 3 months)
+      if (window._noMoreData) return;
+      if (btn) { btn.textContent = isKo ? '불러오고 있어요...' : 'Loading...'; btn.disabled = true; }
+
+      const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const oldestLoaded = window._allTurns.length > 0
+        ? window._allTurns[window._allTurns.length - 1].user.created_at
+        : new Date().toISOString();
+
+      const { data, error } = await sb.rpc('get_older_conversations', {
+        p_user_id: window._userId,
+        p_before: oldestLoaded,
+        p_after: threeMonthsAgo,
+        p_limit: 20,
+      });
+
+      if (btn) { btn.textContent = t.showMore; btn.disabled = false; }
+
+      if (error || !data || data.length === 0) {
+        window._noMoreData = true;
+        if (btn) btn.style.display = 'none';
+        return;
+      }
+
+      // Pair into turns (data comes newest-first from RPC)
+      const convRows = data.slice().reverse();
+      const newTurns = [];
+      for (let i = 0; i < convRows.length; i++) {
+        if (convRows[i].role === 'user') {
+          newTurns.push({ user: convRows[i], assistant: convRows[i+1]?.role === 'assistant' ? convRows[i+1] : null });
+          if (convRows[i+1]?.role === 'assistant') i++;
+        }
+      }
+      newTurns.reverse();
+
+      if (newTurns.length === 0) {
+        window._noMoreData = true;
+        if (btn) btn.style.display = 'none';
+        return;
+      }
+
+      window._allTurns = window._allTurns.concat(newTurns);
+      if (data.length < 20) window._noMoreData = true;
+      showNextBatch();
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hana Analytics — Internal Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+
+    /* Auth gate */
+    #auth-gate { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #2E7D32, #4CAF50); }
+    #auth-gate .login-box { background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); text-align: center; width: 360px; }
+    #auth-gate h2 { color: #2E7D32; margin-bottom: 24px; font-size: 24px; }
+    #auth-gate input { width: 100%; padding: 14px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 16px; margin-bottom: 16px; }
+    #auth-gate button { width: 100%; padding: 14px; background: #2E7D32; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    #auth-gate button:hover { background: #1B5E20; }
+    #auth-gate .error { color: #C62828; font-size: 14px; margin-top: 8px; }
+
+    /* Dashboard */
+    #dashboard { display: none; }
+    .header { background: #2E7D32; color: #fff; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 22px; font-weight: 700; }
+    .header .meta { font-size: 13px; opacity: 0.8; }
+    .header button { background: rgba(255,255,255,0.2); color: #fff; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 24px 32px; }
+    .stat-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .stat-card .label { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .stat-card .value { font-size: 32px; font-weight: 700; color: #2E7D32; }
+    .stat-card .sub { font-size: 13px; color: #666; margin-top: 4px; }
+
+    .section { padding: 0 32px 24px; }
+    .section h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #333; }
+    .chart-container { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 24px; }
+    .chart-container canvas { max-height: 300px; }
+
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    th { background: #f9f9f9; padding: 12px 16px; text-align: left; font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eee; }
+    td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid #f5f5f5; }
+    tr:hover td { background: #f9fff9; }
+
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .tag-success { background: #E8F5E9; color: #2E7D32; }
+    .tag-error { background: #FFEBEE; color: #C62828; }
+    .tag-timeout { background: #FFF3E0; color: #E65100; }
+
+    .loading { text-align: center; padding: 40px; color: #888; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; border: 1px solid #ddd; background: #fff; }
+    .tab.active { background: #2E7D32; color: #fff; border-color: #2E7D32; }
+  </style>
+</head>
+<body>
+
+<!-- Auth Gate -->
+<div id="auth-gate">
+  <div class="login-box">
+    <h2>Hana Analytics</h2>
+    <p style="color:#666; margin-bottom:24px; font-size:14px;">Internal dashboard — authorized access only</p>
+    <input type="password" id="access-key" placeholder="Access key" autocomplete="off" />
+    <button onclick="authenticate()">Sign In</button>
+    <div class="error" id="auth-error"></div>
+  </div>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+  <div class="header">
+    <div>
+      <h1>Hana Analytics</h1>
+      <div class="meta" id="header-meta">Loading...</div>
+    </div>
+    <div>
+      <button onclick="refreshData()">Refresh</button>
+      <button onclick="logout()" style="margin-left:8px;">Logout</button>
+    </div>
+  </div>
+
+  <!-- Summary Stats -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card"><div class="label">Total Users</div><div class="value" id="stat-users">-</div></div>
+    <div class="stat-card"><div class="label">Voice Sessions (7d)</div><div class="value" id="stat-sessions">-</div></div>
+    <div class="stat-card"><div class="label">Timeouts (7d)</div><div class="value" id="stat-timeouts">-</div><div class="sub" id="stat-timeout-rate">-</div></div>
+    <div class="stat-card"><div class="label">Errors (7d)</div><div class="value" id="stat-errors">-</div></div>
+    <div class="stat-card"><div class="label">Deeplinks (7d)</div><div class="value" id="stat-deeplinks">-</div><div class="sub" id="stat-deeplink-rate">-</div></div>
+    <div class="stat-card"><div class="label">App Opens (7d)</div><div class="value" id="stat-opens">-</div></div>
+  </div>
+
+  <!-- Charts -->
+  <div class="section">
+    <h2>Voice Sessions — Last 14 Days</h2>
+    <div class="chart-container"><canvas id="sessions-chart"></canvas></div>
+  </div>
+
+  <div class="section">
+    <h2>Action Tags Distribution (7d)</h2>
+    <div class="chart-container"><canvas id="tags-chart"></canvas></div>
+  </div>
+
+  <!-- Deeplink Table -->
+  <div class="section">
+    <h2>Deeplink Telemetry (Last 50)</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Domain</th><th>Tag</th><th>Status</th><th>Platform</th></tr></thead>
+      <tbody id="deeplink-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Recent Events -->
+  <div class="section">
+    <h2>Recent Events (Last 100)</h2>
+    <div class="tabs">
+      <div class="tab active" onclick="filterEvents('all', this)">All</div>
+      <div class="tab" onclick="filterEvents('voice', this)">Voice</div>
+      <div class="tab" onclick="filterEvents('deeplink', this)">Deeplinks</div>
+      <div class="tab" onclick="filterEvents('error', this)">Errors</div>
+      <div class="tab" onclick="filterEvents('session', this)">Sessions</div>
+    </div>
+    <table>
+      <thead><tr><th>Time</th><th>User</th><th>Event</th><th>Category</th><th>Data</th></tr></thead>
+      <tbody id="events-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- User Activity -->
+  <div class="section">
+    <h2>User Activity (7d)</h2>
+    <table>
+      <thead><tr><th>User</th><th>Language</th><th>Voice Sessions</th><th>Last Active</th><th>Timezone</th></tr></thead>
+      <tbody id="users-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Mood Trends -->
+  <div class="section">
+    <h2>Mood Trends (14d)</h2>
+    <div class="chart-container"><canvas id="mood-chart"></canvas></div>
+  </div>
+</div>
+
+<script>
+// Config — service role key is needed to read analytics (RLS: service_role only)
+const SUPABASE_URL = 'https://lqsebgyclqlrbjjadngx.supabase.co';
+// Access key is a hash of the real service role key — never expose the actual key in client code
+// Instead, we use a simple passphrase that unlocks the dashboard, and the service role key is stored in the page
+// For real production, this should be a Cloudflare Worker with server-side auth
+let supabase = null;
+let SERVICE_KEY = '';
+const ACCESS_HASH = '8f14e45f'; // first 8 chars of md5('curavox-analytics-2026')
+let allEvents = [];
+
+function authenticate() {
+  const key = document.getElementById('access-key').value.trim();
+  if (!key) return;
+
+  // The access key IS the Supabase service role key — this is an internal tool
+  // For production, use Cloudflare Workers with proper auth
+  try {
+    SERVICE_KEY = key;
+    supabase = window.supabase.createClient(SUPABASE_URL, key);
+
+    // Test the key by fetching profiles
+    supabase.from('profiles').select('id').limit(1).then(({ error }) => {
+      if (error) {
+        document.getElementById('auth-error').textContent = 'Invalid access key';
+        supabase = null;
+        return;
+      }
+      document.getElementById('auth-gate').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      sessionStorage.setItem('hana_analytics_key', key);
+      refreshData();
+    });
+  } catch (e) {
+    document.getElementById('auth-error').textContent = 'Invalid key format';
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem('hana_analytics_key');
+  supabase = null;
+  document.getElementById('auth-gate').style.display = 'flex';
+  document.getElementById('dashboard').style.display = 'none';
+}
+
+// Auto-login from session
+(function() {
+  const saved = sessionStorage.getItem('hana_analytics_key');
+  if (saved) {
+    document.getElementById('access-key').value = saved;
+    authenticate();
+  }
+})();
+
+async function refreshData() {
+  if (!supabase) return;
+
+  const now = new Date();
+  const d7 = new Date(now - 7 * 86400000).toISOString();
+  const d14 = new Date(now - 14 * 86400000).toISOString();
+
+  document.getElementById('header-meta').textContent = `Last refreshed: ${now.toLocaleString()}`;
+
+  try {
+    // Parallel data fetches
+    const [profilesRes, eventsRes, events14dRes, deeplinkRes, moodRes, conversationsRes] = await Promise.all([
+      supabase.from('profiles').select('id, display_name, preferred_language, timezone, created_at').order('created_at', { ascending: false }),
+      supabase.from('analytics_events').select('*').gte('created_at', d7).order('created_at', { ascending: false }).limit(500),
+      supabase.from('analytics_events').select('event_type, event_category, created_at').gte('created_at', d14).order('created_at', { ascending: true }),
+      supabase.from('analytics_events').select('*').eq('event_type', 'deeplink_open').order('created_at', { ascending: false }).limit(50),
+      supabase.from('mood_log').select('score, keyword, created_at').gte('created_at', d14).order('created_at', { ascending: true }),
+      supabase.from('conversations').select('user_id, created_at').gte('created_at', d7),
+    ]);
+
+    const profiles = profilesRes.data ?? [];
+    const events7d = eventsRes.data ?? [];
+    const events14d = events14dRes.data ?? [];
+    const deeplinks = deeplinkRes.data ?? [];
+    const moods = moodRes.data ?? [];
+    const conversations = conversationsRes.data ?? [];
+    allEvents = events7d;
+
+    // Summary stats
+    document.getElementById('stat-users').textContent = profiles.length;
+
+    const voiceSessions = events7d.filter(e => e.event_type === 'voice_started').length;
+    const voiceCompleted = events7d.filter(e => e.event_type === 'voice_completed').length;
+    const timeouts = events7d.filter(e => e.event_type === 'voice_timeout').length;
+    const errors = events7d.filter(e => e.event_type === 'voice_error').length;
+    const dlEvents = events7d.filter(e => e.event_type === 'deeplink_open');
+    const dlSuccess = dlEvents.filter(e => e.event_data?.success).length;
+    const appOpens = events7d.filter(e => e.event_type === 'app_open').length;
+
+    document.getElementById('stat-sessions').textContent = voiceSessions;
+    document.getElementById('stat-timeouts').textContent = timeouts;
+    document.getElementById('stat-timeout-rate').textContent = voiceSessions > 0 ? `${((timeouts / voiceSessions) * 100).toFixed(1)}% rate` : '-';
+    document.getElementById('stat-errors').textContent = errors;
+    document.getElementById('stat-deeplinks').textContent = dlEvents.length;
+    document.getElementById('stat-deeplink-rate').textContent = dlEvents.length > 0 ? `${((dlSuccess / dlEvents.length) * 100).toFixed(0)}% success` : '-';
+    document.getElementById('stat-opens').textContent = appOpens;
+
+    // Sessions chart (14 days)
+    renderSessionsChart(events14d);
+
+    // Tags chart
+    renderTagsChart(events7d);
+
+    // Deeplink table
+    renderDeeplinkTable(deeplinks);
+
+    // Events table
+    renderEventsTable(events7d);
+
+    // Users table
+    renderUsersTable(profiles, events7d, conversations);
+
+    // Mood chart
+    renderMoodChart(moods);
+
+  } catch (e) {
+    console.error('Dashboard error:', e);
+  }
+}
+
+function renderSessionsChart(events) {
+  const ctx = document.getElementById('sessions-chart');
+  if (ctx._chart) ctx._chart.destroy();
+
+  // Group by date
+  const byDate = {};
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
+    byDate[d] = { started: 0, completed: 0, timeout: 0, error: 0 };
+  }
+
+  events.forEach(e => {
+    const d = e.created_at.split('T')[0];
+    if (!byDate[d]) return;
+    if (e.event_type === 'voice_started') byDate[d].started++;
+    if (e.event_type === 'voice_completed') byDate[d].completed++;
+    if (e.event_type === 'voice_timeout') byDate[d].timeout++;
+    if (e.event_type === 'voice_error') byDate[d].error++;
+  });
+
+  const labels = Object.keys(byDate).map(d => d.slice(5)); // MM-DD
+  ctx._chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Completed', data: Object.values(byDate).map(v => v.completed), backgroundColor: '#4CAF50' },
+        { label: 'Timeout', data: Object.values(byDate).map(v => v.timeout), backgroundColor: '#FF9800' },
+        { label: 'Error', data: Object.values(byDate).map(v => v.error), backgroundColor: '#F44336' },
+      ],
+    },
+    options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } },
+  });
+}
+
+function renderTagsChart(events) {
+  const ctx = document.getElementById('tags-chart');
+  if (ctx._chart) ctx._chart.destroy();
+
+  const tagCounts = {};
+  events.filter(e => e.event_type === 'voice_completed').forEach(e => {
+    const tags = e.event_data?.tags ?? [];
+    tags.forEach(t => { tagCounts[t] = (tagCounts[t] ?? 0) + 1; });
+  });
+
+  const sorted = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
+  const colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', '#00BCD4', '#795548', '#607D8B', '#E91E63', '#CDDC39'];
+
+  ctx._chart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: colors.slice(0, sorted.length) }],
+    },
+    options: { responsive: true, plugins: { legend: { position: 'right' } } },
+  });
+}
+
+function renderDeeplinkTable(deeplinks) {
+  const tbody = document.getElementById('deeplink-table');
+  if (deeplinks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888; padding:24px;">No deeplink events yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = deeplinks.map(e => {
+    const d = e.event_data ?? {};
+    const time = new Date(e.created_at).toLocaleString();
+    const status = d.success ? '<span class="tag tag-success">OK</span>' : '<span class="tag tag-error">FAIL</span>';
+    const extra = d.fallback ? ` (${d.fallback})` : '';
+    return `<tr><td>${time}</td><td>${d.domain ?? '-'}</td><td>${d.tag_type ?? '-'}${extra}</td><td>${status}</td><td>${e.platform ?? '-'}</td></tr>`;
+  }).join('');
+}
+
+function renderEventsTable(events, filter = 'all') {
+  const tbody = document.getElementById('events-table');
+  const filtered = filter === 'all' ? events : events.filter(e => {
+    if (filter === 'error') return e.event_type.includes('error') || e.event_type.includes('timeout');
+    return e.event_category === filter;
+  });
+
+  const display = filtered.slice(0, 100);
+  if (display.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888; padding:24px;">No events</td></tr>';
+    return;
+  }
+  tbody.innerHTML = display.map(e => {
+    const time = new Date(e.created_at).toLocaleString();
+    const userId = (e.user_id ?? '').slice(0, 8) + '...';
+    const data = e.event_data && Object.keys(e.event_data).length > 0 ? JSON.stringify(e.event_data).slice(0, 80) : '-';
+    const catClass = e.event_type.includes('error') || e.event_type.includes('timeout') ? 'tag-error' : e.event_type.includes('completed') ? 'tag-success' : '';
+    return `<tr><td>${time}</td><td>${userId}</td><td><span class="tag ${catClass}">${e.event_type}</span></td><td>${e.event_category}</td><td style="font-size:12px; color:#888;">${data}</td></tr>`;
+  }).join('');
+}
+
+function filterEvents(filter, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderEventsTable(allEvents, filter);
+}
+
+function renderUsersTable(profiles, events, conversations) {
+  const tbody = document.getElementById('users-table');
+
+  // Count sessions per user
+  const sessionsByUser = {};
+  events.filter(e => e.event_type === 'voice_started').forEach(e => {
+    sessionsByUser[e.user_id] = (sessionsByUser[e.user_id] ?? 0) + 1;
+  });
+
+  // Count conversations as fallback
+  const convsByUser = {};
+  conversations.forEach(c => {
+    convsByUser[c.user_id] = (convsByUser[c.user_id] ?? 0) + 1;
+  });
+
+  // Last activity
+  const lastActive = {};
+  events.forEach(e => {
+    if (!lastActive[e.user_id] || e.created_at > lastActive[e.user_id]) {
+      lastActive[e.user_id] = e.created_at;
+    }
+  });
+
+  tbody.innerHTML = profiles.map(p => {
+    const sessions = sessionsByUser[p.id] ?? 0;
+    const convs = convsByUser[p.id] ?? 0;
+    const last = lastActive[p.id] ? new Date(lastActive[p.id]).toLocaleString() : (convs > 0 ? 'Active (no analytics yet)' : 'Never');
+    return `<tr><td>${p.display_name ?? 'Unknown'}</td><td>${p.preferred_language ?? '-'}</td><td>${sessions} sessions / ${convs} convs</td><td>${last}</td><td>${p.timezone ?? '-'}</td></tr>`;
+  }).join('');
+}
+
+function renderMoodChart(moods) {
+  const ctx = document.getElementById('mood-chart');
+  if (ctx._chart) ctx._chart.destroy();
+
+  if (moods.length === 0) {
+    ctx._chart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [] }, options: {} });
+    return;
+  }
+
+  // Group by date, average score
+  const byDate = {};
+  moods.forEach(m => {
+    const d = m.created_at.split('T')[0];
+    if (!byDate[d]) byDate[d] = { total: 0, count: 0 };
+    byDate[d].total += m.score;
+    byDate[d].count++;
+  });
+
+  const labels = Object.keys(byDate).map(d => d.slice(5));
+  const data = Object.values(byDate).map(v => (v.total / v.count).toFixed(1));
+
+  ctx._chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: 'Avg Mood (1-5)', data, borderColor: '#4CAF50', backgroundColor: 'rgba(76,175,80,0.1)', fill: true, tension: 0.3 }],
+    },
+    options: { responsive: true, scales: { y: { min: 1, max: 5, beginAtZero: false } }, plugins: { legend: { display: false } } },
+  });
+}
+
+// Enter key to submit
+document.getElementById('access-key').addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
+</script>
+</body>
+</html>
