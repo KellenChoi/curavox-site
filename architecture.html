@@ -97,6 +97,19 @@
 </head>
 <body>
 
+<!-- Auth Gate -->
+<div id="auth-gate" style="display:flex; align-items:center; justify-content:center; min-height:100vh; background:linear-gradient(135deg,#2E7D32,#4CAF50);">
+  <div style="background:#fff; padding:40px; border-radius:16px; box-shadow:0 8px 32px rgba(0,0,0,0.2); text-align:center; width:360px;">
+    <h2 style="color:#2E7D32; margin-bottom:8px; font-size:24px;">Hana Architecture</h2>
+    <p style="color:#666; margin-bottom:24px; font-size:14px;">Internal documentation — authorized access only</p>
+    <input type="password" id="access-key" placeholder="Access code" autocomplete="off" style="width:100%; padding:14px 16px; border:2px solid #e0e0e0; border-radius:10px; font-size:16px; margin-bottom:16px;" />
+    <button onclick="checkAccess()" style="width:100%; padding:14px; background:#2E7D32; color:#fff; border:none; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer;">Enter</button>
+    <div id="auth-error" style="color:#C62828; font-size:14px; margin-top:8px;"></div>
+  </div>
+</div>
+
+<div id="main-content" style="display:none;">
+
 <div class="header">
   <h1>Hana — System Architecture</h1>
   <p>AI Voice Companion for Elderly Users | Curavox</p>
@@ -376,6 +389,31 @@
 <div class="footer">
   Curavox &copy; 2026 | Hana — AI Voice Companion | Internal Documentation
 </div>
+
+</div><!-- end main-content -->
+
+<script>
+const ACCESS_CODE = 'curavox2026';
+
+function checkAccess() {
+  const input = document.getElementById('access-key').value.trim();
+  if (input === ACCESS_CODE) {
+    document.getElementById('auth-gate').style.display = 'none';
+    document.getElementById('main-content').style.display = 'block';
+    sessionStorage.setItem('arch_access', 'ok');
+  } else {
+    document.getElementById('auth-error').textContent = 'Invalid access code';
+  }
+}
+
+// Auto-login from session
+if (sessionStorage.getItem('arch_access') === 'ok') {
+  document.getElementById('auth-gate').style.display = 'none';
+  document.getElementById('main-content').style.display = 'block';
+}
+
+document.getElementById('access-key').addEventListener('keydown', e => { if (e.key === 'Enter') checkAccess(); });
+</script>
 
 </body>
 </html>
