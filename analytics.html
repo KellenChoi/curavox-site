@@ -50,6 +50,14 @@
     .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
     .tab { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; border: 1px solid #ddd; background: #fff; }
     .tab.active { background: #2E7D32; color: #fff; border-color: #2E7D32; }
+
+    /* Collapsible sections */
+    .section-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+    .section-header h2 { margin: 0; }
+    .section-toggle { font-size: 20px; color: #888; transition: transform 0.2s; }
+    .section-toggle.collapsed { transform: rotate(-90deg); }
+    .section-body { overflow: hidden; transition: max-height 0.3s ease; }
+    .section-body.collapsed { max-height: 0 !important; padding-top: 0; padding-bottom: 0; }
   </style>
 </head>
 <body>
@@ -101,76 +109,119 @@
 
   <!-- Deeplink Table -->
   <div class="section">
-    <h2>Deeplink Telemetry (Last 50)</h2>
-    <table>
-      <thead><tr><th>Time</th><th>Domain</th><th>Tag</th><th>Status</th><th>Platform</th></tr></thead>
-      <tbody id="deeplink-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
-    </table>
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>Deeplink Telemetry (Last 50)</h2>
+      <span class="section-toggle collapsed">▼</span>
+    </div>
+    <div class="section-body collapsed">
+      <table>
+        <thead><tr><th>Time</th><th>Domain</th><th>Tag</th><th>Status</th><th>Platform</th></tr></thead>
+        <tbody id="deeplink-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Recent Events -->
   <div class="section">
-    <h2>Recent Events (Last 100)</h2>
-    <div class="tabs">
-      <div class="tab active" onclick="filterEvents('all', this)">All</div>
-      <div class="tab" onclick="filterEvents('voice', this)">Voice</div>
-      <div class="tab" onclick="filterEvents('deeplink', this)">Deeplinks</div>
-      <div class="tab" onclick="filterEvents('error', this)">Errors</div>
-      <div class="tab" onclick="filterEvents('session', this)">Sessions</div>
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>Recent Events (Last 100)</h2>
+      <span class="section-toggle collapsed">▼</span>
     </div>
-    <table>
-      <thead><tr><th>Time</th><th>User</th><th>Event</th><th>Category</th><th>Data</th></tr></thead>
-      <tbody id="events-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
-    </table>
+    <div class="section-body collapsed">
+      <div class="tabs">
+        <div class="tab active" onclick="filterEvents('all', this)">All</div>
+        <div class="tab" onclick="filterEvents('voice', this)">Voice</div>
+        <div class="tab" onclick="filterEvents('deeplink', this)">Deeplinks</div>
+        <div class="tab" onclick="filterEvents('error', this)">Errors</div>
+        <div class="tab" onclick="filterEvents('session', this)">Sessions</div>
+      </div>
+      <table>
+        <thead><tr><th>Time</th><th>User</th><th>Event</th><th>Category</th><th>Data</th></tr></thead>
+        <tbody id="events-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- User Activity -->
   <div class="section">
-    <h2>User Activity (7d)</h2>
-    <table>
-      <thead><tr><th>User</th><th>Language</th><th>Voice / Convs</th><th>Auth Sessions</th><th>Last Active</th><th>Timezone</th><th></th></tr></thead>
-      <tbody id="users-table"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
-    </table>
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>User Activity (7d)</h2>
+      <span class="section-toggle">▼</span>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead><tr><th>User</th><th>Language</th><th>Voice / Convs</th><th>Auth Sessions</th><th>Last Active</th><th>Timezone</th><th></th></tr></thead>
+        <tbody id="users-table"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Per-User Detail (shown when clicking a user) -->
   <div class="section" id="user-detail-section" style="display:none;">
     <h2 id="user-detail-title">User Details</h2>
     <div class="stats-grid" id="user-detail-stats"></div>
-    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Auth Sessions</h3>
-    <table>
-      <thead><tr><th>Session ID</th><th>Created</th><th>Last Refreshed</th><th>Status</th></tr></thead>
-      <tbody id="user-auth-table"></tbody>
-    </table>
-    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">LLM Usage & Cost</h3>
-    <div class="stats-grid" id="user-token-stats"></div>
-    <table>
-      <thead><tr><th>Time</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Cost</th><th>Status</th></tr></thead>
-      <tbody id="user-token-table"></tbody>
-    </table>
-    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Recent Conversations (last 20)</h3>
-    <table>
-      <thead><tr><th>Time</th><th>Role</th><th>Content (preview)</th></tr></thead>
-      <tbody id="user-conv-table"></tbody>
-    </table>
+
+    <div class="section-header" onclick="toggleSection(this)" style="margin-top:16px;">
+      <h3 style="font-size:16px; color:#666;">Auth Sessions</h3>
+      <span class="section-toggle collapsed">▼</span>
+    </div>
+    <div class="section-body collapsed">
+      <table>
+        <thead><tr><th>Session ID</th><th>Created</th><th>Last Refreshed</th><th>Status</th></tr></thead>
+        <tbody id="user-auth-table"></tbody>
+      </table>
+    </div>
+
+    <div class="section-header" onclick="toggleSection(this)" style="margin-top:16px;">
+      <h3 style="font-size:16px; color:#666;">LLM Usage & Cost</h3>
+      <span class="section-toggle">▼</span>
+    </div>
+    <div class="section-body">
+      <div class="stats-grid" id="user-token-stats"></div>
+      <table>
+        <thead><tr><th>Time</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody id="user-token-table"></tbody>
+      </table>
+    </div>
+
+    <div class="section-header" onclick="toggleSection(this)" style="margin-top:16px;">
+      <h3 style="font-size:16px; color:#666;">Recent Conversations (last 20)</h3>
+      <span class="section-toggle">▼</span>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead><tr><th>Time</th><th>Role</th><th>Content (preview)</th></tr></thead>
+        <tbody id="user-conv-table"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Token Usage & Cache -->
   <div class="section">
-    <h2>LLM Token Usage & Cache (7d)</h2>
-    <div class="stats-grid" id="token-stats"></div>
-    <div class="chart-container"><canvas id="tokens-chart"></canvas></div>
-    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Recent API Calls</h3>
-    <table>
-      <thead><tr><th>Time</th><th>Model</th><th>Input</th><th>Output</th><th>Cache Created</th><th>Cache Read</th><th>Savings</th></tr></thead>
-      <tbody id="token-table"><tr><td colspan="7" class="loading">No data yet — talk to Hana to generate</td></tr></tbody>
-    </table>
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>LLM Token Usage & Cache (7d)</h2>
+      <span class="section-toggle">▼</span>
+    </div>
+    <div class="section-body">
+      <div class="stats-grid" id="token-stats"></div>
+      <div class="chart-container"><canvas id="tokens-chart"></canvas></div>
+      <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Recent API Calls</h3>
+      <table>
+        <thead><tr><th>Time</th><th>Model</th><th>Input</th><th>Output</th><th>Cache Created</th><th>Cache Read</th><th>Savings</th></tr></thead>
+        <tbody id="token-table"><tr><td colspan="7" class="loading">No data yet — talk to Hana to generate</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Mood Trends -->
   <div class="section">
-    <h2>Mood Trends (14d)</h2>
-    <div class="chart-container"><canvas id="mood-chart"></canvas></div>
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>Mood Trends (14d)</h2>
+      <span class="section-toggle collapsed">▼</span>
+    </div>
+    <div class="section-body collapsed">
+      <div class="chart-container"><canvas id="mood-chart"></canvas></div>
+    </div>
   </div>
 </div>
 
@@ -723,6 +774,25 @@ function renderTokenUsage(events) {
     const modelShort = (d.model ?? '').includes('haiku') ? 'Haiku' : 'Sonnet';
     return `<tr><td>${time}</td><td>${modelShort}</td><td>${inp.toLocaleString()}</td><td>${out.toLocaleString()}</td><td>${cw.toLocaleString()}</td><td>${cr.toLocaleString()}</td><td>$${cost.toFixed(4)}</td><td>${savingsTag}</td></tr>`;
   }).join('');
+}
+
+function toggleSection(headerEl) {
+  const body = headerEl.nextElementSibling;
+  const toggle = headerEl.querySelector('.section-toggle');
+  if (body.classList.contains('collapsed')) {
+    body.classList.remove('collapsed');
+    body.style.maxHeight = body.scrollHeight + 'px';
+    if (toggle) toggle.classList.remove('collapsed');
+    // Reset max-height after transition to allow dynamic content
+    setTimeout(() => { body.style.maxHeight = 'none'; }, 300);
+  } else {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    requestAnimationFrame(() => {
+      body.classList.add('collapsed');
+      body.style.maxHeight = '0';
+    });
+    if (toggle) toggle.classList.add('collapsed');
+  }
 }
 
 // Enter key to submit
