@@ -176,7 +176,10 @@ function authenticate() {
   // For production, use Cloudflare Workers with proper auth
   try {
     SERVICE_KEY = key;
-    supabase = window.supabase.createClient(SUPABASE_URL, key);
+    supabase = window.supabase.createClient(SUPABASE_URL, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: 'Bearer ' + key } },
+    });
 
     // Test the key by fetching profiles
     supabase.from('profiles').select('id').limit(1).then(({ error }) => {
