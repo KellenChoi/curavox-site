@@ -142,6 +142,12 @@
       <thead><tr><th>Session ID</th><th>Created</th><th>Last Refreshed</th><th>Status</th></tr></thead>
       <tbody id="user-auth-table"></tbody>
     </table>
+    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">LLM Usage & Cost</h3>
+    <div class="stats-grid" id="user-token-stats"></div>
+    <table>
+      <thead><tr><th>Time</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Cost</th><th>Status</th></tr></thead>
+      <tbody id="user-token-table"></tbody>
+    </table>
     <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Recent Conversations (last 20)</h3>
     <table>
       <thead><tr><th>Time</th><th>Role</th><th>Content (preview)</th></tr></thead>
@@ -497,6 +503,82 @@ async function showUserDetail(userId) {
     <div class="stat-card"><div class="label">Session Health</div><div class="value" style="font-size:18px;color:${healthColor}">${sessionHealth}</div></div>
     <div class="stat-card"><div class="label">Last Sign-In</div><div class="value" style="font-size:16px;">${lastSignIn}</div></div>
   `;
+
+  // LLM usage for this user
+  const PRICING = {
+    'claude-sonnet-4-6': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
+    'claude-haiku-4-5-20251001': { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
+  };
+  const DEFAULT_PRICING = PRICING['claude-sonnet-4-6'];
+
+  const userLlm = await sb('analytics_events', `select=*&user_id=eq.${userId}&event_type=eq.llm_usage&order=created_at.desc&limit=50`);
+  const tokenStatDiv = document.getElementById('user-token-stats');
+  const tokenTbody = document.getElementById('user-token-table');
+
+  if (!userLlm || userLlm.length === 0) {
+    tokenStatDiv.innerHTML = '<div class="stat-card"><div class="label">Status</div><div class="value" style="font-size:16px;">No LLM data yet</div></div>';
+    tokenTbody.innerHTML = '<tr><td colspan="7" style="color:#888;text-align:center;">No API calls recorded</td></tr>';
+  } else {
+    let uInput = 0, uOutput = 0, uCacheW = 0, uCacheR = 0, uCost = 0, uNoCacheCost = 0, sonnetCalls = 0, haikuCalls = 0;
+    userLlm.forEach(e => {
+      const d = e.event_data ?? {};
+      const p = PRICING[d.model] ?? DEFAULT_PRICING;
+      const inp = d.input_tokens ?? 0, out = d.output_tokens ?? 0, cw = d.cache_creation_tokens ?? 0, cr = d.cache_read_tokens ?? 0;
+      uInput += inp; uOutput += out; uCacheW += cw; uCacheR += cr;
+      uCost += (inp * p.input + out * p.output + cw * p.cacheWrite + cr * p.cacheRead) / 1_000_000;
+      uNoCacheCost += ((inp + cw + cr) * p.input + out * p.output) / 1_000_000;
+      if ((d.model ?? '').includes('haiku')) haikuCalls++; else sonnetCalls++;
+    });
+    const uSaved = uNoCacheCost - uCost;
+    const uCacheRate = uCacheR > 0 ? ((uCacheR / (uCacheR + uCacheW + uInput)) * 100).toFixed(0) : '0';
+
+    tokenStatDiv.innerHTML = `
+      <div class="stat-card"><div class="label">Total Cost</div><div class="value" style="color:#C62828">$${uCost.toFixed(4)}</div><div class="sub">Without cache: $${uNoCacheCost.toFixed(4)}</div></div>
+      <div class="stat-card"><div class="label">Cache Savings</div><div class="value" style="color:#2E7D32">$${uSaved.toFixed(4)}</div><div class="sub">${uCacheRate}% hit rate</div></div>
+      <div class="stat-card"><div class="label">API Calls</div><div class="value">${userLlm.length}</div><div class="sub">Sonnet: ${sonnetCalls} / Haiku: ${haikuCalls}</div></div>
+      <div class="stat-card"><div class="label">Avg Cost/Call</div><div class="value">$${(uCost / userLlm.length).toFixed(4)}</div></div>
+    `;
+
+    // Per-call table with cache status
+    tokenTbody.innerHTML = userLlm.map((e, i) => {
+      const d = e.event_data ?? {};
+      const p = PRICING[d.model] ?? DEFAULT_PRICING;
+      const time = new Date(e.created_at).toLocaleString();
+      const inp = d.input_tokens ?? 0, out = d.output_tokens ?? 0, cw = d.cache_creation_tokens ?? 0, cr = d.cache_read_tokens ?? 0;
+      const cost = (inp * p.input + out * p.output + cw * p.cacheWrite + cr * p.cacheRead) / 1_000_000;
+      const modelShort = (d.model ?? '').includes('haiku') ? 'Haiku' : 'Sonnet';
+
+      // Determine cache status
+      let cacheStatus = '';
+      if (cr > 0 && cw === 0) {
+        cacheStatus = '<span class="tag tag-success">Cache HIT</span>';
+      } else if (cr > 0 && cw > 0) {
+        cacheStatus = '<span class="tag tag-success">Partial HIT</span>';
+      } else if (cw > 0 && cr === 0) {
+        // Check if next call (earlier in array = later in time) used this cache
+        const nextSameModel = userLlm.slice(0, i).reverse().find(n => (n.event_data?.model ?? '') === (d.model ?? ''));
+        const nextCr = nextSameModel?.event_data?.cache_read_tokens ?? 0;
+        if (nextCr > 0) {
+          cacheStatus = '<span class="tag" style="background:#E3F2FD;color:#1565C0;">Created → used</span>';
+        } else {
+          // Check time gap to next same-model call
+          const nextTime = nextSameModel ? new Date(nextSameModel.created_at).getTime() : 0;
+          const thisTime = new Date(e.created_at).getTime();
+          if (nextSameModel && (nextTime - thisTime) > 5 * 60 * 1000) {
+            cacheStatus = '<span class="tag tag-timeout">Created → expired (>5min)</span>';
+          } else if (!nextSameModel) {
+            cacheStatus = '<span class="tag" style="background:#FFF3E0;color:#E65100;">Created → no follow-up</span>';
+          } else {
+            cacheStatus = '<span class="tag tag-error">Created → missed</span>';
+          }
+        }
+      } else {
+        cacheStatus = '<span class="tag" style="background:#f5f5f5;">No cache</span>';
+      }
+
+      return `<tr><td>${time}</td><td>${modelShort}</td><td>${inp.toLocaleString()}</td><td>${out.toLocaleString()}</td><td>${cr > 0 ? cr.toLocaleString() + ' read' : cw > 0 ? cw.toLocaleString() + ' written' : '-'}</td><td>$${cost.toFixed(4)}</td><td>${cacheStatus}</td></tr>`;
+    }).join('');
+  }
 
   // Recent conversations for this user
   const convTbody = document.getElementById('user-conv-table');
