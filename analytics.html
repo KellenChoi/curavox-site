@@ -555,25 +555,42 @@ function renderTokenUsage(events) {
     return;
   }
 
-  // Aggregate stats
-  let totalInput = 0, totalOutput = 0, totalCacheCreated = 0, totalCacheRead = 0;
+  // Pricing per million tokens
+  const PRICING = {
+    'claude-sonnet-4-6': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
+    'claude-haiku-4-5-20251001': { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
+  };
+  const DEFAULT_PRICING = PRICING['claude-sonnet-4-6'];
+
+  // Aggregate stats + cost
+  let totalInput = 0, totalOutput = 0, totalCacheCreated = 0, totalCacheRead = 0, totalCost = 0, totalCostWithoutCache = 0;
   llmEvents.forEach(e => {
     const d = e.event_data ?? {};
-    totalInput += d.input_tokens ?? 0;
-    totalOutput += d.output_tokens ?? 0;
-    totalCacheCreated += d.cache_creation_tokens ?? 0;
-    totalCacheRead += d.cache_read_tokens ?? 0;
+    const p = PRICING[d.model] ?? DEFAULT_PRICING;
+    const inp = d.input_tokens ?? 0;
+    const out = d.output_tokens ?? 0;
+    const cw = d.cache_creation_tokens ?? 0;
+    const cr = d.cache_read_tokens ?? 0;
+    totalInput += inp;
+    totalOutput += out;
+    totalCacheCreated += cw;
+    totalCacheRead += cr;
+    // Actual cost: input * input_price + output * output_price + cache_write * write_price + cache_read * read_price
+    totalCost += (inp * p.input + out * p.output + cw * p.cacheWrite + cr * p.cacheRead) / 1_000_000;
+    // What it would cost WITHOUT caching (all tokens at full input price)
+    totalCostWithoutCache += ((inp + cw + cr) * p.input + out * p.output) / 1_000_000;
   });
 
   const cacheHitRate = totalCacheRead > 0 ? ((totalCacheRead / (totalCacheRead + totalCacheCreated + totalInput)) * 100).toFixed(0) : '0';
-  const estimatedSavings = (totalCacheRead * 0.003 * 0.9 / 1000).toFixed(4); // 90% savings on cached tokens at $3/M
+  const savedAmount = totalCostWithoutCache - totalCost;
 
   statsDiv.innerHTML = `
     <div class="stat-card"><div class="label">API Calls (7d)</div><div class="value">${llmEvents.length}</div></div>
-    <div class="stat-card"><div class="label">Total Input Tokens</div><div class="value">${(totalInput + totalCacheCreated + totalCacheRead).toLocaleString()}</div></div>
-    <div class="stat-card"><div class="label">Total Output Tokens</div><div class="value">${totalOutput.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="label">Cache Hit Rate</div><div class="value" style="color:${parseInt(cacheHitRate) > 50 ? '#2E7D32' : '#F57C00'}">${cacheHitRate}%</div></div>
-    <div class="stat-card"><div class="label">Cache Read Tokens</div><div class="value">${totalCacheRead.toLocaleString()}</div><div class="sub">~$${estimatedSavings} saved</div></div>
+    <div class="stat-card"><div class="label">Total Cost</div><div class="value" style="color:#C62828">$${totalCost.toFixed(4)}</div><div class="sub">Without cache: $${totalCostWithoutCache.toFixed(4)}</div></div>
+    <div class="stat-card"><div class="label">Cache Savings</div><div class="value" style="color:#2E7D32">$${savedAmount.toFixed(4)}</div><div class="sub">${cacheHitRate}% hit rate</div></div>
+    <div class="stat-card"><div class="label">Avg Cost/Call</div><div class="value">${llmEvents.length > 0 ? '$' + (totalCost / llmEvents.length).toFixed(4) : '-'}</div></div>
+    <div class="stat-card"><div class="label">Input Tokens</div><div class="value">${(totalInput + totalCacheCreated + totalCacheRead).toLocaleString()}</div></div>
+    <div class="stat-card"><div class="label">Output Tokens</div><div class="value">${totalOutput.toLocaleString()}</div></div>
   `;
 
   // Token usage chart
@@ -606,13 +623,23 @@ function renderTokenUsage(events) {
     options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } },
   });
 
-  // Recent API calls table
+  // Recent API calls table with cost
+  document.querySelector('#token-table').closest('table').querySelector('thead tr').innerHTML =
+    '<th>Time</th><th>Model</th><th>Input</th><th>Output</th><th>Cache Created</th><th>Cache Read</th><th>Cost</th><th>Savings</th>';
   tbody.innerHTML = llmEvents.slice(0, 20).map(e => {
     const d = e.event_data ?? {};
+    const p = PRICING[d.model] ?? DEFAULT_PRICING;
     const time = new Date(e.created_at).toLocaleString();
-    const cached = d.cache_read_tokens ?? 0;
-    const savings = cached > 0 ? `<span class="tag tag-success">${((cached / ((d.input_tokens ?? 0) + cached)) * 100).toFixed(0)}% cached</span>` : '<span class="tag" style="background:#f5f5f5;">no cache</span>';
-    return `<tr><td>${time}</td><td>${d.model ?? '-'}</td><td>${(d.input_tokens ?? 0).toLocaleString()}</td><td>${(d.output_tokens ?? 0).toLocaleString()}</td><td>${(d.cache_creation_tokens ?? 0).toLocaleString()}</td><td>${cached.toLocaleString()}</td><td>${savings}</td></tr>`;
+    const inp = d.input_tokens ?? 0;
+    const out = d.output_tokens ?? 0;
+    const cw = d.cache_creation_tokens ?? 0;
+    const cr = d.cache_read_tokens ?? 0;
+    const cost = (inp * p.input + out * p.output + cw * p.cacheWrite + cr * p.cacheRead) / 1_000_000;
+    const noCacheCost = ((inp + cw + cr) * p.input + out * p.output) / 1_000_000;
+    const saved = noCacheCost - cost;
+    const savingsTag = cr > 0 ? `<span class="tag tag-success">-$${saved.toFixed(4)}</span>` : '<span class="tag" style="background:#f5f5f5;">-</span>';
+    const modelShort = (d.model ?? '').includes('haiku') ? 'Haiku' : 'Sonnet';
+    return `<tr><td>${time}</td><td>${modelShort}</td><td>${inp.toLocaleString()}</td><td>${out.toLocaleString()}</td><td>${cw.toLocaleString()}</td><td>${cr.toLocaleString()}</td><td>$${cost.toFixed(4)}</td><td>${savingsTag}</td></tr>`;
   }).join('');
 }
 
