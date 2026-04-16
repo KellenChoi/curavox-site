@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Hana Analytics — Internal Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -158,49 +157,55 @@
 </div>
 
 <script>
-// Config — service role key is needed to read analytics (RLS: service_role only)
 const SUPABASE_URL = 'https://lqsebgyclqlrbjjadngx.supabase.co';
-// Access key is a hash of the real service role key — never expose the actual key in client code
-// Instead, we use a simple passphrase that unlocks the dashboard, and the service role key is stored in the page
-// For real production, this should be a Cloudflare Worker with server-side auth
-let supabase = null;
 let SERVICE_KEY = '';
-const ACCESS_HASH = '8f14e45f'; // first 8 chars of md5('curavox-analytics-2026')
 let allEvents = [];
+
+// Simple Supabase REST helper — bypasses JS client entirely
+async function sb(table, params = '') {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+    headers: { 'apikey': SERVICE_KEY, 'Authorization': 'Bearer ' + SERVICE_KEY },
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+async function sbRpc(fn) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { 'apikey': SERVICE_KEY, 'Authorization': 'Bearer ' + SERVICE_KEY, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
 
 function authenticate() {
   const key = document.getElementById('access-key').value.trim();
   if (!key) return;
 
-  // The access key IS the Supabase service role key — this is an internal tool
-  // For production, use Cloudflare Workers with proper auth
-  try {
-    SERVICE_KEY = key;
-    supabase = window.supabase.createClient(SUPABASE_URL, key, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: 'Bearer ' + key } },
-    });
+  SERVICE_KEY = key;
 
-    // Test the key by fetching profiles
-    supabase.from('profiles').select('id').limit(1).then(({ error }) => {
-      if (error) {
-        document.getElementById('auth-error').textContent = 'Invalid access key';
-        supabase = null;
-        return;
-      }
-      document.getElementById('auth-gate').style.display = 'none';
-      document.getElementById('dashboard').style.display = 'block';
-      sessionStorage.setItem('hana_analytics_key', key);
-      refreshData();
-    });
-  } catch (e) {
-    document.getElementById('auth-error').textContent = 'Invalid key format';
-  }
+  // Test the key
+  fetch(`${SUPABASE_URL}/rest/v1/profiles?select=id&limit=1`, {
+    headers: { 'apikey': key, 'Authorization': 'Bearer ' + key },
+  }).then(res => {
+    if (!res.ok) {
+      document.getElementById('auth-error').textContent = 'Invalid access key';
+      SERVICE_KEY = '';
+      return;
+    }
+    document.getElementById('auth-gate').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    sessionStorage.setItem('hana_analytics_key', key);
+    refreshData();
+  }).catch(() => {
+    document.getElementById('auth-error').textContent = 'Connection failed';
+  });
 }
 
 function logout() {
   sessionStorage.removeItem('hana_analytics_key');
-  supabase = null;
+  SERVICE_KEY = '';
   document.getElementById('auth-gate').style.display = 'flex';
   document.getElementById('dashboard').style.display = 'none';
 }
@@ -215,7 +220,7 @@ function logout() {
 })();
 
 async function refreshData() {
-  if (!supabase) return;
+  if (!SERVICE_KEY) return;
 
   const now = new Date();
   const d7 = new Date(now - 7 * 86400000).toISOString();
@@ -224,24 +229,16 @@ async function refreshData() {
   document.getElementById('header-meta').textContent = `Last refreshed: ${now.toLocaleString()}`;
 
   try {
-    // Parallel data fetches
-    const [profilesRes, eventsRes, events14dRes, deeplinkRes, moodRes, conversationsRes, authSessionsRes] = await Promise.all([
-      supabase.from('profiles').select('id, display_name, preferred_language, timezone, created_at').order('created_at', { ascending: false }),
-      supabase.from('analytics_events').select('*').gte('created_at', d7).order('created_at', { ascending: false }).limit(500),
-      supabase.from('analytics_events').select('event_type, event_category, created_at').gte('created_at', d14).order('created_at', { ascending: true }),
-      supabase.from('analytics_events').select('*').eq('event_type', 'deeplink_open').order('created_at', { ascending: false }).limit(50),
-      supabase.from('mood_log').select('score, keyword, created_at').gte('created_at', d14).order('created_at', { ascending: true }),
-      supabase.from('conversations').select('user_id, created_at').gte('created_at', d7),
-      supabase.rpc('get_auth_sessions'),
+    const [profiles, events7d, events14d, deeplinks, moods, conversations, authSessions] = await Promise.all([
+      sb('profiles', 'select=id,display_name,preferred_language,timezone,created_at&order=created_at.desc'),
+      sb('analytics_events', `select=*&created_at=gte.${d7}&order=created_at.desc&limit=500`),
+      sb('analytics_events', `select=event_type,event_category,created_at&created_at=gte.${d14}&order=created_at.asc`),
+      sb('analytics_events', `select=*&event_type=eq.deeplink_open&order=created_at.desc&limit=50`),
+      sb('mood_log', `select=score,keyword,created_at&created_at=gte.${d14}&order=created_at.asc`),
+      sb('conversations', `select=user_id,created_at&created_at=gte.${d7}`),
+      sbRpc('get_auth_sessions'),
     ]);
 
-    const profiles = profilesRes.data ?? [];
-    const events7d = eventsRes.data ?? [];
-    const events14d = events14dRes.data ?? [];
-    const deeplinks = deeplinkRes.data ?? [];
-    const moods = moodRes.data ?? [];
-    const conversations = conversationsRes.data ?? [];
-    const authSessions = authSessionsRes.data ?? [];
     allEvents = events7d;
 
     // Summary stats
@@ -488,8 +485,7 @@ async function showUserDetail(userId) {
 
   // Recent conversations for this user
   const convTbody = document.getElementById('user-conv-table');
-  const { data: convs } = await supabase.from('conversations').select('role, content, created_at')
-    .eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
+  const convs = await sb('conversations', `select=role,content,created_at&user_id=eq.${userId}&order=created_at.desc&limit=20`);
 
   if (!convs || convs.length === 0) {
     convTbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">No conversations</td></tr>';
