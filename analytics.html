@@ -129,8 +129,24 @@
   <div class="section">
     <h2>User Activity (7d)</h2>
     <table>
-      <thead><tr><th>User</th><th>Language</th><th>Voice Sessions</th><th>Last Active</th><th>Timezone</th></tr></thead>
-      <tbody id="users-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+      <thead><tr><th>User</th><th>Language</th><th>Voice / Convs</th><th>Auth Sessions</th><th>Last Active</th><th>Timezone</th><th></th></tr></thead>
+      <tbody id="users-table"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Per-User Detail (shown when clicking a user) -->
+  <div class="section" id="user-detail-section" style="display:none;">
+    <h2 id="user-detail-title">User Details</h2>
+    <div class="stats-grid" id="user-detail-stats"></div>
+    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Auth Sessions</h3>
+    <table>
+      <thead><tr><th>Session ID</th><th>Created</th><th>Last Refreshed</th><th>Status</th></tr></thead>
+      <tbody id="user-auth-table"></tbody>
+    </table>
+    <h3 style="margin:16px 0 8px; font-size:16px; color:#666;">Recent Conversations (last 20)</h3>
+    <table>
+      <thead><tr><th>Time</th><th>Role</th><th>Content (preview)</th></tr></thead>
+      <tbody id="user-conv-table"></tbody>
     </table>
   </div>
 
@@ -206,13 +222,14 @@ async function refreshData() {
 
   try {
     // Parallel data fetches
-    const [profilesRes, eventsRes, events14dRes, deeplinkRes, moodRes, conversationsRes] = await Promise.all([
+    const [profilesRes, eventsRes, events14dRes, deeplinkRes, moodRes, conversationsRes, authSessionsRes] = await Promise.all([
       supabase.from('profiles').select('id, display_name, preferred_language, timezone, created_at').order('created_at', { ascending: false }),
       supabase.from('analytics_events').select('*').gte('created_at', d7).order('created_at', { ascending: false }).limit(500),
       supabase.from('analytics_events').select('event_type, event_category, created_at').gte('created_at', d14).order('created_at', { ascending: true }),
       supabase.from('analytics_events').select('*').eq('event_type', 'deeplink_open').order('created_at', { ascending: false }).limit(50),
       supabase.from('mood_log').select('score, keyword, created_at').gte('created_at', d14).order('created_at', { ascending: true }),
       supabase.from('conversations').select('user_id, created_at').gte('created_at', d7),
+      supabase.rpc('get_auth_sessions'),
     ]);
 
     const profiles = profilesRes.data ?? [];
@@ -221,6 +238,7 @@ async function refreshData() {
     const deeplinks = deeplinkRes.data ?? [];
     const moods = moodRes.data ?? [];
     const conversations = conversationsRes.data ?? [];
+    const authSessions = authSessionsRes.data ?? [];
     allEvents = events7d;
 
     // Summary stats
@@ -254,8 +272,8 @@ async function refreshData() {
     // Events table
     renderEventsTable(events7d);
 
-    // Users table
-    renderUsersTable(profiles, events7d, conversations);
+    // Users table (with auth session data)
+    renderUsersTable(profiles, events7d, conversations, authSessions);
 
     // Mood chart
     renderMoodChart(moods);
@@ -365,8 +383,15 @@ function filterEvents(filter, el) {
   renderEventsTable(allEvents, filter);
 }
 
-function renderUsersTable(profiles, events, conversations) {
+// Store data globally for per-user detail view
+let _profiles = [];
+let _authSessions = [];
+let _allConversations = [];
+
+function renderUsersTable(profiles, events, conversations, authSessions) {
   const tbody = document.getElementById('users-table');
+  _profiles = profiles;
+  _authSessions = authSessions;
 
   // Count sessions per user
   const sessionsByUser = {};
@@ -374,10 +399,21 @@ function renderUsersTable(profiles, events, conversations) {
     sessionsByUser[e.user_id] = (sessionsByUser[e.user_id] ?? 0) + 1;
   });
 
-  // Count conversations as fallback
+  // Count conversations
   const convsByUser = {};
   conversations.forEach(c => {
     convsByUser[c.user_id] = (convsByUser[c.user_id] ?? 0) + 1;
+  });
+
+  // Count auth sessions per user
+  const authByUser = {};
+  (authSessions ?? []).forEach(s => {
+    if (!authByUser[s.user_id]) authByUser[s.user_id] = { total: 0, refreshed: 0, last: null };
+    authByUser[s.user_id].total++;
+    if (s.refreshed_at) authByUser[s.user_id].refreshed++;
+    if (!authByUser[s.user_id].last || s.created_at > authByUser[s.user_id].last) {
+      authByUser[s.user_id].last = s.created_at;
+    }
   });
 
   // Last activity
@@ -391,9 +427,77 @@ function renderUsersTable(profiles, events, conversations) {
   tbody.innerHTML = profiles.map(p => {
     const sessions = sessionsByUser[p.id] ?? 0;
     const convs = convsByUser[p.id] ?? 0;
-    const last = lastActive[p.id] ? new Date(lastActive[p.id]).toLocaleString() : (convs > 0 ? 'Active (no analytics yet)' : 'Never');
-    return `<tr><td>${p.display_name ?? 'Unknown'}</td><td>${p.preferred_language ?? '-'}</td><td>${sessions} sessions / ${convs} convs</td><td>${last}</td><td>${p.timezone ?? '-'}</td></tr>`;
+    const auth = authByUser[p.id] ?? { total: 0, refreshed: 0 };
+    const last = lastActive[p.id] ? new Date(lastActive[p.id]).toLocaleString() : (convs > 0 ? 'Active (pre-analytics)' : 'Never');
+    const authLabel = auth.total > 0
+      ? `${auth.total} login${auth.total > 1 ? 's' : ''} (${auth.refreshed} refreshed)`
+      : '<span style="color:#888">0</span>';
+    const authColor = auth.total > 3 ? 'color:#C62828;font-weight:600;' : '';
+    return `<tr>
+      <td><strong>${p.display_name ?? 'Unknown'}</strong></td>
+      <td>${p.preferred_language ?? '-'}</td>
+      <td>${sessions} / ${convs}</td>
+      <td style="${authColor}">${authLabel}</td>
+      <td>${last}</td>
+      <td>${p.timezone ?? '-'}</td>
+      <td><button onclick="showUserDetail('${p.id}')" style="padding:4px 12px;border:1px solid #2E7D32;background:#fff;color:#2E7D32;border-radius:6px;cursor:pointer;font-size:12px;">Details</button></td>
+    </tr>`;
   }).join('');
+}
+
+async function showUserDetail(userId) {
+  const section = document.getElementById('user-detail-section');
+  section.style.display = 'block';
+  section.scrollIntoView({ behavior: 'smooth' });
+
+  const profile = _profiles.find(p => p.id === userId);
+  document.getElementById('user-detail-title').textContent = `${profile?.display_name ?? 'Unknown'} — Details`;
+
+  // Auth sessions for this user
+  const userAuth = (_authSessions ?? []).filter(s => s.user_id === userId);
+  const authTbody = document.getElementById('user-auth-table');
+  if (userAuth.length === 0) {
+    authTbody.innerHTML = '<tr><td colspan="4" style="color:#888;text-align:center;">No sessions</td></tr>';
+  } else {
+    authTbody.innerHTML = userAuth.map(s => {
+      const created = new Date(s.created_at).toLocaleString();
+      const refreshed = s.refreshed_at ? new Date(s.refreshed_at).toLocaleString() : '<span style="color:#C62828">Never refreshed</span>';
+      const isActive = s.refreshed_at && (Date.now() - new Date(s.refreshed_at).getTime()) < 7 * 86400000;
+      const status = isActive ? '<span class="tag tag-success">Active</span>' : '<span class="tag tag-error">Expired</span>';
+      return `<tr><td style="font-size:12px;font-family:monospace;">${(s.session_id ?? '').slice(0, 8)}...</td><td>${created}</td><td>${refreshed}</td><td>${status}</td></tr>`;
+    }).join('');
+  }
+
+  // Summary stats for this user
+  const statsDiv = document.getElementById('user-detail-stats');
+  const totalLogins = userAuth.length;
+  const refreshedCount = userAuth.filter(s => s.refreshed_at).length;
+  const lastSignIn = profile?.created_at ? new Date(userAuth[0]?.created_at ?? profile.created_at).toLocaleString() : '-';
+  const sessionHealth = totalLogins <= 1 ? 'Healthy' : (refreshedCount > 0 ? 'OK — some refreshes' : 'Re-logging in repeatedly');
+  const healthColor = totalLogins <= 1 ? '#2E7D32' : (refreshedCount > 0 ? '#F57C00' : '#C62828');
+
+  statsDiv.innerHTML = `
+    <div class="stat-card"><div class="label">Total Logins</div><div class="value" style="color:${totalLogins > 3 ? '#C62828' : '#2E7D32'}">${totalLogins}</div></div>
+    <div class="stat-card"><div class="label">Refreshed Sessions</div><div class="value">${refreshedCount}</div></div>
+    <div class="stat-card"><div class="label">Session Health</div><div class="value" style="font-size:18px;color:${healthColor}">${sessionHealth}</div></div>
+    <div class="stat-card"><div class="label">Last Sign-In</div><div class="value" style="font-size:16px;">${lastSignIn}</div></div>
+  `;
+
+  // Recent conversations for this user
+  const convTbody = document.getElementById('user-conv-table');
+  const { data: convs } = await supabase.from('conversations').select('role, content, created_at')
+    .eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
+
+  if (!convs || convs.length === 0) {
+    convTbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">No conversations</td></tr>';
+  } else {
+    convTbody.innerHTML = convs.map(c => {
+      const time = new Date(c.created_at).toLocaleString();
+      const preview = (c.content ?? '').slice(0, 100) + ((c.content ?? '').length > 100 ? '...' : '');
+      const roleTag = c.role === 'user' ? '<span class="tag" style="background:#E3F2FD;color:#1565C0;">User</span>' : '<span class="tag" style="background:#E8F5E9;color:#2E7D32;">Hana</span>';
+      return `<tr><td>${time}</td><td>${roleTag}</td><td style="font-size:13px;">${preview}</td></tr>`;
+    }).join('');
+  }
 }
 
 function renderMoodChart(moods) {
