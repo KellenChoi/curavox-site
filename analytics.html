@@ -185,14 +185,16 @@
     </div>
 
     <div class="section-header" onclick="toggleSection(this)" style="margin-top:16px;">
-      <h3 style="font-size:16px; color:#666;">Recent Conversations (last 20)</h3>
+      <h3 style="font-size:16px; color:#666;">Conversation History</h3>
       <span class="section-toggle">▼</span>
     </div>
     <div class="section-body">
-      <table>
-        <thead><tr><th>Time</th><th>Role</th><th>Content (preview)</th></tr></thead>
-        <tbody id="user-conv-table"></tbody>
-      </table>
+      <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+        <button onclick="loadConvPage(-1)" id="conv-prev" style="padding:6px 12px; border:1px solid #ddd; border-radius:6px; background:#fff; cursor:pointer;" disabled>← Older</button>
+        <span id="conv-page-info" style="font-size:13px; color:#888;">Page 1</span>
+        <button onclick="loadConvPage(1)" id="conv-next" style="padding:6px 12px; border:1px solid #ddd; border-radius:6px; background:#fff; cursor:pointer;">Newer →</button>
+      </div>
+      <div id="user-conv-container"></div>
     </div>
   </div>
 
@@ -540,6 +542,10 @@ async function showUserDetail(userId) {
     }).join('');
   }
 
+  // Get app version from latest analytics event
+  const versionEvents = await sb('analytics_events', `select=app_version&user_id=eq.${userId}&app_version=neq.null&order=created_at.desc&limit=1`);
+  const appVersion = versionEvents?.[0]?.app_version ?? 'Unknown';
+
   // Summary stats for this user
   const statsDiv = document.getElementById('user-detail-stats');
   const totalLogins = userAuth.length;
@@ -549,8 +555,8 @@ async function showUserDetail(userId) {
   const healthColor = totalLogins <= 1 ? '#2E7D32' : (refreshedCount > 0 ? '#F57C00' : '#C62828');
 
   statsDiv.innerHTML = `
+    <div class="stat-card"><div class="label">App Version</div><div class="value">v${appVersion}</div></div>
     <div class="stat-card"><div class="label">Total Logins</div><div class="value" style="color:${totalLogins > 3 ? '#C62828' : '#2E7D32'}">${totalLogins}</div></div>
-    <div class="stat-card"><div class="label">Refreshed Sessions</div><div class="value">${refreshedCount}</div></div>
     <div class="stat-card"><div class="label">Session Health</div><div class="value" style="font-size:18px;color:${healthColor}">${sessionHealth}</div></div>
     <div class="stat-card"><div class="label">Last Sign-In</div><div class="value" style="font-size:16px;">${lastSignIn}</div></div>
   `;
@@ -631,20 +637,10 @@ async function showUserDetail(userId) {
     }).join('');
   }
 
-  // Recent conversations for this user
-  const convTbody = document.getElementById('user-conv-table');
-  const convs = await sb('conversations', `select=role,content,created_at&user_id=eq.${userId}&order=created_at.desc&limit=20`);
-
-  if (!convs || convs.length === 0) {
-    convTbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">No conversations</td></tr>';
-  } else {
-    convTbody.innerHTML = convs.map(c => {
-      const time = new Date(c.created_at).toLocaleString();
-      const preview = (c.content ?? '').slice(0, 100) + ((c.content ?? '').length > 100 ? '...' : '');
-      const roleTag = c.role === 'user' ? '<span class="tag" style="background:#E3F2FD;color:#1565C0;">User</span>' : '<span class="tag" style="background:#E8F5E9;color:#2E7D32;">Hana</span>';
-      return `<tr><td>${time}</td><td>${roleTag}</td><td style="font-size:13px;">${preview}</td></tr>`;
-    }).join('');
-  }
+  // Conversation history with date grouping and pagination
+  _currentConvUserId = userId;
+  _convPage = 0;
+  await loadConversations(userId, 0);
 }
 
 function renderMoodChart(moods) {
@@ -774,6 +770,54 @@ function renderTokenUsage(events) {
     const modelShort = (d.model ?? '').includes('haiku') ? 'Haiku' : 'Sonnet';
     return `<tr><td>${time}</td><td>${modelShort}</td><td>${inp.toLocaleString()}</td><td>${out.toLocaleString()}</td><td>${cw.toLocaleString()}</td><td>${cr.toLocaleString()}</td><td>$${cost.toFixed(4)}</td><td>${savingsTag}</td></tr>`;
   }).join('');
+}
+
+// Conversation pagination
+let _currentConvUserId = '';
+let _convPage = 0;
+const CONV_PER_PAGE = 50;
+
+async function loadConversations(userId, page) {
+  const container = document.getElementById('user-conv-container');
+  const offset = page * CONV_PER_PAGE;
+  const convs = await sb('conversations', `select=role,content,created_at&user_id=eq.${userId}&order=created_at.desc&limit=${CONV_PER_PAGE}&offset=${offset}`);
+
+  document.getElementById('conv-page-info').textContent = `Page ${page + 1}`;
+  document.getElementById('conv-prev').disabled = page === 0;
+  document.getElementById('conv-next').disabled = !convs || convs.length < CONV_PER_PAGE;
+
+  if (!convs || convs.length === 0) {
+    container.innerHTML = '<p style="color:#888; text-align:center; padding:24px;">No conversations</p>';
+    return;
+  }
+
+  // Group by date
+  const byDate = {};
+  convs.forEach(c => {
+    const date = new Date(c.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+    if (!byDate[date]) byDate[date] = [];
+    byDate[date].push(c);
+  });
+
+  let html = '';
+  for (const [date, msgs] of Object.entries(byDate)) {
+    html += `<div style="margin-bottom:16px;">`;
+    html += `<div style="font-size:14px; font-weight:700; color:#2E7D32; margin-bottom:8px; padding:6px 12px; background:#E8F5E9; border-radius:8px;">${date} (${msgs.length} messages)</div>`;
+    html += `<table><thead><tr><th style="width:100px;">Time</th><th style="width:60px;">Role</th><th>Content</th></tr></thead><tbody>`;
+    msgs.forEach(c => {
+      const time = new Date(c.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      const content = c.content ?? '';
+      const roleTag = c.role === 'user' ? '<span class="tag" style="background:#E3F2FD;color:#1565C0;">User</span>' : '<span class="tag" style="background:#E8F5E9;color:#2E7D32;">Hana</span>';
+      html += `<tr><td>${time}</td><td>${roleTag}</td><td style="font-size:13px; white-space:pre-wrap; word-break:break-word;">${content}</td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  container.innerHTML = html;
+}
+
+function loadConvPage(dir) {
+  _convPage = Math.max(0, _convPage + dir);
+  loadConversations(_currentConvUserId, _convPage);
 }
 
 function toggleSection(headerEl) {
