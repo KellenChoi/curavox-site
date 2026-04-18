@@ -198,6 +198,21 @@
     </div>
   </div>
 
+  <!-- Push Notification History -->
+  <div class="section">
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>Push Notifications (7d)</h2>
+      <span class="section-toggle collapsed">▼</span>
+    </div>
+    <div class="section-body collapsed">
+      <div class="stats-grid" id="push-stats"></div>
+      <table>
+        <thead><tr><th>Time</th><th>User</th><th>Type</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody id="push-table"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Token Usage & Cache -->
   <div class="section">
     <div class="section-header" onclick="toggleSection(this)">
@@ -348,6 +363,9 @@ async function refreshData() {
 
     // Mood chart
     renderMoodChart(moods);
+
+    // Push notifications
+    renderPushHistory(events7d);
 
     // Token usage
     renderTokenUsage(events7d);
@@ -672,6 +690,40 @@ function renderMoodChart(moods) {
     },
     options: { responsive: true, scales: { y: { min: 1, max: 5, beginAtZero: false } }, plugins: { legend: { display: false } } },
   });
+}
+
+function renderPushHistory(events) {
+  const pushEvents = events.filter(e => e.event_type === 'push_sent' || e.event_type === 'push_failed');
+  const statsDiv = document.getElementById('push-stats');
+  const tbody = document.getElementById('push-table');
+
+  const sent = pushEvents.filter(e => e.event_type === 'push_sent').length;
+  const failed = pushEvents.filter(e => e.event_type === 'push_failed').length;
+  const byType = {};
+  pushEvents.forEach(e => {
+    const t = e.event_data?.message_type ?? 'unknown';
+    byType[t] = (byType[t] ?? 0) + 1;
+  });
+
+  statsDiv.innerHTML = `
+    <div class="stat-card"><div class="label">Sent (7d)</div><div class="value" style="color:#2E7D32">${sent}</div></div>
+    <div class="stat-card"><div class="label">Failed (7d)</div><div class="value" style="color:${failed > 0 ? '#C62828' : '#2E7D32'}">${failed}</div></div>
+    <div class="stat-card"><div class="label">By Type</div><div class="value" style="font-size:14px;">${Object.entries(byType).map(([k,v]) => `${k}: ${v}`).join(', ') || 'No data'}</div></div>
+  `;
+
+  if (pushEvents.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:#888;text-align:center;">No push notifications recorded yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = pushEvents.map(e => {
+    const d = e.event_data ?? {};
+    const time = new Date(e.created_at).toLocaleString();
+    const userId = (e.user_id ?? '').slice(0, 8) + '...';
+    const status = e.event_type === 'push_sent'
+      ? '<span class="tag tag-success">Sent</span>'
+      : '<span class="tag tag-error">Failed</span>';
+    return `<tr><td>${time}</td><td>${userId}</td><td>${d.message_type ?? '-'}</td><td>${d.push_type ?? '-'}</td><td>${status}</td></tr>`;
+  }).join('');
 }
 
 function renderTokenUsage(events) {
