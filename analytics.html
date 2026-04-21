@@ -761,16 +761,35 @@ function renderPushHistory(events) {
 
   const sent = pushEvents.filter(e => e.event_type === 'push_sent').length;
   const failed = pushEvents.filter(e => e.event_type === 'push_failed').length;
+
+  // Group by user for per-user breakdown
+  const byUser = {};
   const byType = {};
   pushEvents.forEach(e => {
     const t = e.event_data?.message_type ?? 'unknown';
     byType[t] = (byType[t] ?? 0) + 1;
+    const uid = e.user_id ?? 'unknown';
+    if (!byUser[uid]) byUser[uid] = { sent: 0, failed: 0 };
+    if (e.event_type === 'push_sent') byUser[uid].sent++;
+    else byUser[uid].failed++;
   });
+
+  // Build per-user summary
+  const userSummary = Object.entries(byUser).map(([uid, counts]) => {
+    const profile = _profiles.find(p => p.id === uid);
+    const name = profile?.display_name ?? uid.slice(0, 8) + '...';
+    return `${name}: ${counts.sent} sent${counts.failed > 0 ? `, ${counts.failed} failed` : ''}`;
+  }).join(' | ');
+
+  // Check which users have NO push token
+  const missingTokenUsers = _profiles.filter(p => !p.expo_push_token).map(p => p.display_name ?? p.id.slice(0, 8));
 
   statsDiv.innerHTML = `
     <div class="stat-card"><div class="label">Sent (7d)</div><div class="value" style="color:#2E7D32">${sent}</div></div>
     <div class="stat-card"><div class="label">Failed (7d)</div><div class="value" style="color:${failed > 0 ? '#C62828' : '#2E7D32'}">${failed}</div></div>
     <div class="stat-card"><div class="label">By Type</div><div class="value" style="font-size:14px;">${Object.entries(byType).map(([k,v]) => `${k}: ${v}`).join(', ') || 'No data'}</div></div>
+    <div class="stat-card"><div class="label">Per User</div><div class="value" style="font-size:14px;">${userSummary || 'No data'}</div></div>
+    ${missingTokenUsers.length > 0 ? `<div class="stat-card"><div class="label">Missing Push Token</div><div class="value" style="font-size:16px;color:#C62828">${missingTokenUsers.join(', ')}</div><div class="sub">These users cannot receive any push notifications</div></div>` : ''}
   `;
 
   if (pushEvents.length === 0) {
@@ -780,11 +799,16 @@ function renderPushHistory(events) {
   tbody.innerHTML = pushEvents.map(e => {
     const d = e.event_data ?? {};
     const time = new Date(e.created_at).toLocaleString();
-    const userId = (e.user_id ?? '').slice(0, 8) + '...';
+    const profile = _profiles.find(p => p.id === e.user_id);
+    const userName = profile?.display_name ?? (e.user_id ?? '').slice(0, 8) + '...';
+    const hasToken = !!profile?.expo_push_token;
+    const userCell = hasToken
+      ? `<span style="cursor:pointer;color:#2E7D32;text-decoration:underline;" onclick="showUserDetail('${e.user_id}')">${userName}</span>`
+      : `<span style="color:#C62828;" title="No push token">${userName} ⚠️</span>`;
     const status = e.event_type === 'push_sent'
       ? '<span class="tag tag-success">Sent</span>'
       : '<span class="tag tag-error">Failed</span>';
-    return `<tr><td>${time}</td><td>${userId}</td><td>${d.message_type ?? '-'}</td><td>${d.push_type ?? '-'}</td><td>${status}</td></tr>`;
+    return `<tr><td>${time}</td><td>${userCell}</td><td>${d.message_type ?? '-'}</td><td>${d.push_type ?? '-'}</td><td>${status}</td></tr>`;
   }).join('');
 }
 
