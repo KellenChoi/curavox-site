@@ -185,6 +185,19 @@
     </div>
 
     <div class="section-header" onclick="toggleSection(this)" style="margin-top:16px;">
+      <h3 style="font-size:16px; color:#666;">Push Notifications</h3>
+      <span class="section-toggle collapsed">▼</span>
+    </div>
+    <div class="section-body collapsed">
+      <div class="stats-grid" id="user-push-stats"></div>
+      <table>
+        <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody id="user-push-table"></tbody>
+      </table>
+      <div id="user-proactive-messages" style="margin-top:16px;"></div>
+    </div>
+
+    <div class="section-header" onclick="toggleSection(this)" style="margin-top:16px;">
       <h3 style="font-size:16px; color:#666;">Conversation History</h3>
       <span class="section-toggle">▼</span>
     </div>
@@ -653,6 +666,55 @@ async function showUserDetail(userId) {
 
       return `<tr><td>${time}</td><td>${modelShort}</td><td>${inp.toLocaleString()}</td><td>${out.toLocaleString()}</td><td>${cr > 0 ? cr.toLocaleString() + ' read' : cw > 0 ? cw.toLocaleString() + ' written' : '-'}</td><td>$${cost.toFixed(4)}</td><td>${cacheStatus}</td></tr>`;
     }).join('');
+  }
+
+  // Per-user push notifications
+  const userPushEvents = await sb('analytics_events', `select=*&user_id=eq.${userId}&event_type=in.(push_sent,push_failed)&order=created_at.desc&limit=30`);
+  const userProactiveMsgs = await sb('proactive_messages', `select=*&user_id=eq.${userId}&order=created_at.desc&limit=20`);
+  const pushStatsDiv = document.getElementById('user-push-stats');
+  const pushTbody = document.getElementById('user-push-table');
+  const proactiveMsgsDiv = document.getElementById('user-proactive-messages');
+
+  const hasPushToken = !!profile?.expo_push_token;
+  const pushSent = (userPushEvents ?? []).filter(e => e.event_type === 'push_sent').length;
+  const pushFailed = (userPushEvents ?? []).filter(e => e.event_type === 'push_failed').length;
+
+  pushStatsDiv.innerHTML = `
+    <div class="stat-card"><div class="label">Push Token</div><div class="value" style="font-size:16px;color:${hasPushToken ? '#2E7D32' : '#C62828'}">${hasPushToken ? 'Active' : 'Missing!'}</div>${!hasPushToken ? '<div class="sub" style="color:#C62828;">No push notifications can be delivered</div>' : ''}</div>
+    <div class="stat-card"><div class="label">Pushes Sent</div><div class="value">${pushSent}</div></div>
+    <div class="stat-card"><div class="label">Pushes Failed</div><div class="value" style="color:${pushFailed > 0 ? '#C62828' : '#2E7D32'}">${pushFailed}</div></div>
+    <div class="stat-card"><div class="label">Proactive Messages</div><div class="value">${(userProactiveMsgs ?? []).length}</div></div>
+  `;
+
+  if (!userPushEvents || userPushEvents.length === 0) {
+    pushTbody.innerHTML = '<tr><td colspan="4" style="color:#888;text-align:center;">No push events recorded</td></tr>';
+  } else {
+    pushTbody.innerHTML = userPushEvents.map(e => {
+      const d = e.event_data ?? {};
+      const time = new Date(e.created_at).toLocaleString();
+      const status = e.event_type === 'push_sent'
+        ? '<span class="tag tag-success">Sent</span>'
+        : '<span class="tag tag-error">Failed</span>';
+      return `<tr><td>${time}</td><td>${d.message_type ?? '-'}</td><td>${d.push_type ?? '-'}</td><td>${status}</td></tr>`;
+    }).join('');
+  }
+
+  // Show proactive messages content
+  if (userProactiveMsgs && userProactiveMsgs.length > 0) {
+    proactiveMsgsDiv.innerHTML = `
+      <h4 style="font-size:14px; color:#666; margin-bottom:8px;">Proactive Messages Generated</h4>
+      <table>
+        <thead><tr><th>Time</th><th>Type</th><th>Message (KO)</th><th>Message (EN)</th></tr></thead>
+        <tbody>${userProactiveMsgs.map(m => {
+          const time = new Date(m.created_at).toLocaleString();
+          const ko = (m.message_ko ?? '').length > 60 ? m.message_ko.slice(0, 60) + '...' : (m.message_ko ?? '-');
+          const en = (m.message_en ?? '').length > 60 ? m.message_en.slice(0, 60) + '...' : (m.message_en ?? '-');
+          return `<tr><td>${time}</td><td>${m.context_type ?? '-'}</td><td style="font-size:13px;">${ko}</td><td style="font-size:13px;">${en}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    `;
+  } else {
+    proactiveMsgsDiv.innerHTML = '';
   }
 
   // Conversation history with date grouping and pagination
