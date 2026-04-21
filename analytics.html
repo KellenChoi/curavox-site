@@ -329,7 +329,7 @@ async function refreshData() {
 
   try {
     const [profiles, events7d, events14d, deeplinks, moods, conversations, authSessions] = await Promise.all([
-      sb('profiles', 'select=id,display_name,preferred_language,timezone,created_at&order=created_at.desc'),
+      sb('profiles', 'select=id,display_name,preferred_language,timezone,expo_push_token,created_at&order=created_at.desc'),
       sb('analytics_events', `select=*&created_at=gte.${d7}&order=created_at.desc&limit=500`),
       sb('analytics_events', `select=event_type,event_category,created_at&created_at=gte.${d14}&order=created_at.asc`),
       sb('analytics_events', `select=*&event_type=eq.deeplink_open&order=created_at.desc&limit=50`),
