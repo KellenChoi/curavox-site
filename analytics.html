@@ -150,7 +150,7 @@
     </div>
     <div class="section-body">
       <table>
-        <thead><tr><th>User</th><th>Language</th><th>Voice / Convs</th><th>Auth Sessions</th><th>Last Active</th><th>Timezone</th><th></th></tr></thead>
+        <thead><tr><th>User</th><th>Lang</th><th>Voice / Convs</th><th>Auth Sessions</th><th>Push</th><th>Last Active</th><th>Device</th><th></th></tr></thead>
         <tbody id="users-table"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -538,13 +538,22 @@ function renderUsersTable(profiles, events, conversations, authSessions) {
       ? `${auth.total} login${auth.total > 1 ? 's' : ''} (${auth.refreshed} refreshed)`
       : '<span style="color:#888">0</span>';
     const authColor = auth.total > 3 ? 'color:#C62828;font-weight:600;' : '';
+    const pushStatus = p.expo_push_token
+      ? '<span class="tag tag-success">Active</span>'
+      : '<span class="tag tag-error">Missing</span>';
+    // Get device info from latest app_open event
+    const appOpenEvent = events.find(e => e.user_id === p.id && e.event_type === 'app_open' && e.event_data?.model);
+    const deviceLabel = appOpenEvent
+      ? `${appOpenEvent.event_data.brand ?? ''} ${appOpenEvent.event_data.model ?? ''} (${appOpenEvent.event_data.os_version ?? '?'})`
+      : '<span style="color:#888">Unknown</span>';
     return `<tr>
       <td><strong>${p.display_name ?? 'Unknown'}</strong></td>
       <td>${p.preferred_language ?? '-'}</td>
       <td>${sessions} / ${convs}</td>
       <td style="${authColor}">${authLabel}</td>
+      <td>${pushStatus}</td>
       <td>${last}</td>
-      <td>${p.timezone ?? '-'}</td>
+      <td style="font-size:12px;">${deviceLabel}</td>
       <td><button onclick="showUserDetail('${p.id}')" style="padding:4px 12px;border:1px solid #2E7D32;background:#fff;color:#2E7D32;border-radius:6px;cursor:pointer;font-size:12px;">Details</button></td>
     </tr>`;
   }).join('');
